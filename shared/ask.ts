@@ -4,7 +4,7 @@ import type { AskAnswerEntry, AskItem, AskQuestion, CanvasItem } from "./model.t
 export function questionsOf(item: AskItem): AskQuestion[] {
   if (item.questions) return item.questions;
   if (!item.question || !item.options) return [];
-  return [{ question: item.question, html: item.html, options: item.options, allowOther: item.allowOther, optionWidth: item.optionWidth }];
+  return [{ question: item.question, html: item.html, options: item.options, allowOther: item.allowOther, multiple: item.multiple, optionWidth: item.optionWidth }];
 }
 
 /**
@@ -19,3 +19,12 @@ export function newestWaitingAsk(items: CanvasItem[]): AskItem | undefined {
 
 /** All the answers on one line, for a list of past questions and for a note of what was sent. */
 export const answersSummary = (answers: AskAnswerEntry[]) => answers.map(({ label }) => label).join(" · ");
+
+/** Between the options a user ticked, in the one line their answer is. */
+export const TICKED_JOINER = "; ";
+
+/** The options of a question that an answer line names, in the question's order. */
+export const tickedLabelsIn = (question: AskQuestion, answerLabel: string | undefined) => {
+  const named = (answerLabel ?? "").split(TICKED_JOINER);
+  return question.options.map(({ label }) => label).filter((label) => named.includes(label));
+};
