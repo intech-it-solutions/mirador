@@ -309,14 +309,10 @@ export function startServer(services: HostServices) {
   const hasAllowedHost = (request: Request) => tunnelEnds.has(request) || allowedHosts.has(request.headers.get("host") ?? "");
   const pageOrigins = ownPageOrigins(config, certificate);
   const isOwnOrigin = (origin: string, host: string | null) => origin === `http://${host}` || origin === `https://${host}`;
-  /**
-   * Through the tunnel, a page is served from whatever address the device's proxy listens on, so its origin matches its Host.
-   * With no Origin at all, a request still counts as from this host's own page when the browser says, in Sec-Fetch-Site,
-   * that it is same-origin: WebView2 on Windows can leave Origin off a same-origin POST, and page scripts cannot set that header.
-   */
+  /** Through the tunnel, a page is served from whatever address the device's proxy listens on, so its origin matches its Host. */
   const isPageOrigin = (request: Request) => {
     const origin = request.headers.get("origin");
-    if (origin === null) return request.headers.get("sec-fetch-site") === "same-origin";
+    if (origin === null) return false;
     return tunnelEnds.has(request) ? isOwnOrigin(origin, request.headers.get("host")) : pageOrigins.includes(origin);
   };
   const localCanvasAssetsOrigin = `http://127.0.0.1:${config.canvasAssetsPort}`;
@@ -892,8 +888,8 @@ export function startServer(services: HostServices) {
 
   /**
    * Only the owner's own pages, signed in with the browser cookie, may read or add a conversation's images and dropped files,
-   * or read an app's files. A page's POST needs this host's origin, or no Origin with Sec-Fetch-Site same-origin, which is how
-   * WebView2 on Windows can send a same-origin POST.
+   * or read an app's files. A page's POST needs this host's origin, or no Origin with Sec-Fetch-Site same-origin: WebView2 on
+   * Windows can leave Origin off a same-origin POST, and page scripts cannot set that header.
    */
   function refusedPageRequest(request: Request) {
     if (!hasAllowedHost(request)) return new Response("forbidden host", { status: 403 });
@@ -901,7 +897,8 @@ export function startServer(services: HostServices) {
     if (caller instanceof Response) return caller;
     const site = request.headers.get("sec-fetch-site");
     if (site && site !== "same-origin") return new Response("forbidden", { status: 403 });
-    if (request.method !== "GET" && !isPageOrigin(request)) return new Response("forbidden origin", { status: 403 });
+    const sameOriginWithoutOrigin = !request.headers.has("origin") && site === "same-origin";
+    if (request.method !== "GET" && !sameOriginWithoutOrigin && !isPageOrigin(request)) return new Response("forbidden origin", { status: 403 });
     return null;
   }
 
