@@ -2331,7 +2331,7 @@ export class ConversationService {
   private stopIdleOwnProcess(conversationId: string) {
     this.idleOwnProcesses.delete(conversationId);
     const runtime = this.runtimes.get(conversationId);
-    const busy = runtime?.running || runtime?.pendingPermissions.size || runtime?.queuedMessages.length;
+    const busy = runtime?.running || runtime?.pendingPermissions.size || runtime?.queuedMessages.length || runtime?.subagentTasksAtWork.size;
     if (this.stopping || !runtime?.harness || busy || !this.isOwnProcess(conversationId, runtime.harness)) return;
     void this.killAgent(runtime.harness, { kind: "stopped" });
   }
@@ -2744,6 +2744,7 @@ export class ConversationService {
       usageLimitWait: runtime.usageLimit !== undefined,
       jobWaitsThatResume: this.jobWaits.in(conversationId).filter(({ resume }) => resume).length,
       asyncTasks: this.asyncTasks.in(conversationId).length,
+      subagentTasks: runtime.subagentTasksAtWork.size,
       watched: !justPutAway && this.hub.isWatched(conversationId),
     });
     if (settled) await this.releaseSession(conversationId, runtime, sessionId);
@@ -3914,7 +3915,19 @@ export class ConversationService {
     const { subagentTaskStatus } = (update._meta?.claudeCode ?? {}) as { subagentTaskStatus?: unknown };
     const { subagentTasksAtWork } = this.runtime(conversationId);
     if (subagentTaskStatus === "running") subagentTasksAtWork.add(update.toolCallId);
-    else if (typeof subagentTaskStatus === "string" && isSubagentTaskEnd(subagentTaskStatus)) subagentTasksAtWork.delete(update.toolCallId);
+    else if (typeof subagentTaskStatus === "string" && isSubagentTaskEnd(subagentTaskStatus)) {
+      const wasAtWork = subagentTasksAtWork.delete(update.toolCallId);
+      if (wasAtWork && subagentTasksAtWork.size === 0) this.lastSubagentTaskEnded(conversationId);
+    }
+  }
+
+  /**
+   * The last background subagent of a conversation ended. Putting the conversation away, or the idle stop, may have been
+   * held back for it, so both are tried again: the session is freed if it has settled, and the idle stop is armed again.
+   */
+  private lastSubagentTaskEnded(conversationId: string) {
+    void this.freeSessionIfSettled(conversationId);
+    this.stopOwnProcessOnceIdle(conversationId);
   }
 
   /** What Mirador saw of the turn itself, whatever the agent reports of its tokens. */
@@ -4894,6 +4907,8 @@ export interface SessionUse {
   usageLimitWait: boolean;
   jobWaitsThatResume: number;
   asyncTasks: number;
+  /** Background subagents whose tasks are running: the session's process holds them, and their results come back through it. */
+  subagentTasks: number;
   /** A focused page shows it: the user reads it, maybe about to write. */
   watched: boolean;
 }
@@ -4907,6 +4922,7 @@ export const sessionIsSettled = (use: SessionUse) =>
   !use.usageLimitWait &&
   use.jobWaitsThatResume === 0 &&
   use.asyncTasks === 0 &&
+  use.subagentTasks === 0 &&
   !use.watched;
 
 /** Messages queued after a /clear or a /reload wait for it, rather than join the turn in the session it replaces. */

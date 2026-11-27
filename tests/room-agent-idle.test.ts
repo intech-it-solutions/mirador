@@ -117,3 +117,28 @@ test("a room conversation whose room is gone gets what a room's agent gets by de
   expect(given?.(host, parseEnvironment("DEPLOY_TOKEN=x"))).toEqual({ PATH: "/bin", HOME: "/home/owner", OPENCODE_CONFIG: "/opencode.json" });
   expect(inside.environmentGivenTo({ roomId: null }, profile)).toBeUndefined();
 });
+
+/** A background subagent's task reported running or ended, through the same path the agent's session updates take. */
+const subagentTaskUpdate = (sessionId: string, toolCallId: string, subagentTaskStatus: string) => ({
+  sessionId,
+  update: { sessionUpdate: "tool_call_update" as const, toolCallId, _meta: { claudeCode: { subagentTaskStatus } } },
+});
+
+test("a room conversation's agent process is not stopped for idleness while a subagent task runs, and is once the last task ends", async () => {
+  const { conversations, inside, stops, room, turnEnded } = roomAndOwnersConversations();
+  const sessions = (conversations as unknown as { sessions: { bind(conversationId: string, sessionId: string): void } }).sessions;
+  sessions.bind(room.id, "room-session");
+  const hear = (notification: ReturnType<typeof subagentTaskUpdate>) => (conversations as unknown as { handleSessionUpdate(n: unknown): void }).handleSessionUpdate(notification);
+  turnEnded(room);
+  hear(subagentTaskUpdate("room-session", "a1", "running"));
+  hear(subagentTaskUpdate("room-session", "a2", "running"));
+  await Bun.sleep(IDLE_MS * 4);
+  expect(stops).toEqual([]);
+  hear(subagentTaskUpdate("room-session", "a1", "completed"));
+  await Bun.sleep(IDLE_MS * 4);
+  expect(stops, "one task still at work").toEqual([]);
+  hear(subagentTaskUpdate("room-session", "a2", "completed"));
+  await Bun.sleep(IDLE_MS * 4);
+  expect(stops).toEqual(["room"]);
+  expect(inside.runtime(room.id).harness).toBeUndefined();
+});

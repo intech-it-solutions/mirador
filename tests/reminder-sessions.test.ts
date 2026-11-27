@@ -10,6 +10,7 @@ const idle: SessionUse = {
   usageLimitWait: false,
   jobWaitsThatResume: 0,
   asyncTasks: 0,
+  subagentTasks: 0,
   watched: false,
 };
 
@@ -24,6 +25,7 @@ test("a put-away conversation's session is freed only once nothing could still n
     { usageLimitWait: true },
     { jobWaitsThatResume: 1 },
     { asyncTasks: 1 },
+    { subagentTasks: 1 },
     { watched: true },
   ];
   stillNeeded.forEach((use) => expect(sessionIsSettled({ ...idle, ...use })).toBe(false));
